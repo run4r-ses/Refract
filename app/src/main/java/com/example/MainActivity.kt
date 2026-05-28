@@ -141,6 +141,7 @@ fun DecoderAppScreen(
 
     val uiState by viewModel.uiState.collectAsState()
     val supportInfo by viewModel.supportInfo.collectAsState()
+    val hardwareEnforcementLevel by viewModel.hardwareEnforcementLevel.collectAsState()
     val exportMode by viewModel.exportMode.collectAsState()
     val showAtmosFallbackBanner by viewModel.showAtmosFallbackBanner.collectAsState()
     val hasSeenOnboarding by viewModel.hasSeenOnboarding.collectAsState()
@@ -304,6 +305,7 @@ fun DecoderAppScreen(
                 item {
                     CapabilitiesHardwareCard(
                         supportInfo = supportInfo,
+                        hardwareEnforcementLevel = hardwareEnforcementLevel,
                         showDiagnostics = showDiagnostics,
                         onToggleDiagnostics = { showDiagnostics = !showDiagnostics },
                         onHelpClick = { showHardwareInfoSheet = true },
@@ -438,7 +440,9 @@ fun DecoderAppScreen(
                         is AudioDecoderViewModel.UIState.Error -> {
                             ErrorDisplayCard(
                                 message = state.message,
-                                onDismiss = { viewModel.resetToIdle() }
+                                onDismiss = { viewModel.resetToIdle() },
+                                onAction = state.onAction,
+                                actionLabel = state.actionLabel
                             )
                         }
                     }
@@ -682,6 +686,7 @@ fun AnimatedCodecRow(
 @Composable
 fun CapabilitiesHardwareCard(
     supportInfo: DecoderSupportInfo?,
+    hardwareEnforcementLevel: AudioDecoderViewModel.HardwareEnforcementLevel,
     showDiagnostics: Boolean,
     onToggleDiagnostics: () -> Unit,
     onHelpClick: () -> Unit,
@@ -711,6 +716,20 @@ fun CapabilitiesHardwareCard(
             hasEac3 = eac3Codec != null
             eac3DecoderName = eac3Codec?.name ?: "MpegAudioSoftwareFallback"
         }
+    }
+
+    val enforcementColor = when (hardwareEnforcementLevel) {
+        AudioDecoderViewModel.HardwareEnforcementLevel.FULL -> AcidGreen
+        AudioDecoderViewModel.HardwareEnforcementLevel.PARTIAL -> CyberCyan
+        AudioDecoderViewModel.HardwareEnforcementLevel.SOFTWARE -> PurpleGlow
+        AudioDecoderViewModel.HardwareEnforcementLevel.NONE -> RedAlert
+    }
+
+    val enforcementText = when (hardwareEnforcementLevel) {
+        AudioDecoderViewModel.HardwareEnforcementLevel.FULL -> "HARDWARE ENFORCED"
+        AudioDecoderViewModel.HardwareEnforcementLevel.PARTIAL -> "PARTIAL HARDWARE"
+        AudioDecoderViewModel.HardwareEnforcementLevel.SOFTWARE -> "SOFTWARE MODE"
+        AudioDecoderViewModel.HardwareEnforcementLevel.NONE -> "NO DOLBY DECODERS"
     }
 
     val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition()
@@ -745,7 +764,7 @@ fun CapabilitiesHardwareCard(
                             .size(10.dp)
                             .clip(CircleShape)
                             .alpha(if (isReducedMotion) 1f else pulseAlpha)
-                            .background(if (hasAc4) AcidGreen else CyberCyan)
+                            .background(enforcementColor)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -757,8 +776,8 @@ fun CapabilitiesHardwareCard(
                 }
 
                 Text(
-                    text = "HARDWARE ENFORCED",
-                    color = AcidGreen,
+                    text = enforcementText,
+                    color = enforcementColor,
                     fontWeight = FontWeight.Black,
                     fontSize = 11.sp,
                     letterSpacing = 0.5.sp
@@ -2370,7 +2389,9 @@ fun SoundVisualizerBars() {
 @Composable
 fun ErrorDisplayCard(
     message: String,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onAction: (() -> Unit)? = null,
+    actionLabel: String? = null
 ) {
     val context = LocalContext.current
     val isReducedMotion = android.provider.Settings.Global.getFloat(
@@ -2438,20 +2459,56 @@ fun ErrorDisplayCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Button(
-                onClick = onDismiss,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(40.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = SurfaceBorder),
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text(
-                    text = if (message.contains("Permission Denial", ignoreCase = true) || message.contains("SecurityException", ignoreCase = true)) "Re-open File" else "DISMISS ERRORS",
-                    color = IceWhite,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 12.sp
-                )
+            if (onAction != null && actionLabel != null) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Button(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SurfaceBorder),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text("DISMISS", color = IceWhite, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    }
+                    Button(
+                        onClick = {
+                            onDismiss()
+                            onAction()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = AcidGreen),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Text(
+                            text = actionLabel.uppercase(java.util.Locale.getDefault()),
+                            color = CardDark,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+            } else {
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(40.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = SurfaceBorder),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Text(
+                        text = if (message.contains("Permission Denial", ignoreCase = true) || message.contains("SecurityException", ignoreCase = true)) "Re-open File" else "DISMISS ERRORS",
+                        color = IceWhite,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    )
+                }
             }
         }
     }

@@ -24,6 +24,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +50,13 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         StereoBinauralWav
     }
 
+    enum class HardwareEnforcementLevel {
+        FULL,     // All relevant codecs have hardware decoders
+        PARTIAL,  // At least one has hardware, but not all
+        SOFTWARE, // All are software/emulated only
+        NONE      // No Dolby decoders found at all
+    }
+
     sealed interface UIState {
         object Idle : UIState
         data class FileSelected(
@@ -65,7 +75,11 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
             val exportedFiles: List<File>,
             val reportFile: File? = null
         ) : UIState
-        data class Error(val message: String) : UIState
+        data class Error(
+            val message: String,
+            val onAction: (() -> Unit)? = null,
+            val actionLabel: String? = null
+        ) : UIState
     }
 
     private val prefs: SharedPreferences = application.getSharedPreferences("refract_decoder_prefs", Context.MODE_PRIVATE)
@@ -75,6 +89,45 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
 
     private val _supportInfo = MutableStateFlow<DecoderSupportInfo?>(null)
     val supportInfo: StateFlow<DecoderSupportInfo?> = _supportInfo.asStateFlow()
+
+    fun deriveHardwareEnforcementLevel(info: DecoderSupportInfo?): HardwareEnforcementLevel {
+        if (info == null) return HardwareEnforcementLevel.NONE
+        
+        val hasAc4 = info.hasAc4Decoder
+        val hasHardwareEac3 = info.availableCodecs.any { 
+            it.mimeType.contains("eac3", ignoreCase = true) && 
+            !it.isEncoder && 
+            !it.name.lowercase(Locale.getDefault()).contains("google") 
+        }
+        
+        val hasAnyAc4 = hasAc4 || info.availableCodecs.any { it.mimeType.contains("ac4", ignoreCase = true) }
+        val hasAnyEac3 = info.availableCodecs.any { it.mimeType.contains("eac3", ignoreCase = true) }
+        
+        val sdkInt = info.sdkInt
+        
+        // FULL: hasAc4Decoder = true AND has non-Google eac3 decoder AND (SDK >= 36 for L4 OR L4 not applicable)
+        val isFull = hasAc4 && hasHardwareEac3 && (sdkInt >= 36 || sdkInt < 36)
+        
+        // PARTIAL: hasAc4Decoder = true XOR has hardware eac3 decoder
+        val isPartial = hasAc4 xor hasHardwareEac3
+        
+        return when {
+            isFull -> HardwareEnforcementLevel.FULL
+            isPartial -> HardwareEnforcementLevel.PARTIAL
+            hasAnyAc4 || hasAnyEac3 -> HardwareEnforcementLevel.SOFTWARE
+            else -> HardwareEnforcementLevel.NONE
+        }
+    }
+
+    val hardwareEnforcementLevel: StateFlow<HardwareEnforcementLevel> = _supportInfo
+        .map { info ->
+            deriveHardwareEnforcementLevel(info)
+        }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = HardwareEnforcementLevel.NONE
+        )
 
     private val _exportMode = MutableStateFlow(ExportMode.StereoBinauralWav)
     val exportMode: StateFlow<ExportMode> = _exportMode.asStateFlow()
@@ -422,7 +475,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
 
     fun getExportsDir(): File {
         val context = getApplication<Application>()
-        val privateDir = File(context.cacheDir, "exports").apply { mkdirs() }
+        val privateDir = File(context.filesDir, "exports").apply { mkdirs() }
         _exportLocationLabel.value = "MediaStore.Downloads"
         return privateDir
     }
@@ -508,6 +561,8 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                             finalFiles.add(destFile)
                         }
                         ExportMode.StereoBinauralWav -> {
+                            val currentState = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
+                            _uiState.value = currentState.copy(progress = 0.99f, status = "Downmixing to stereo...")
                             val destFile = File(exportsDir, "${clearName}_stereo_binaural.wav")
                             WavHelper.downmixToStereWav(
                                 inputFile = cachePcmFile,
@@ -519,6 +574,8 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                             finalFiles.add(destFile)
                         }
                         ExportMode.MonoWavCustomSplit -> {
+                            val currentState = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
+                            _uiState.value = currentState.copy(progress = 0.99f, status = "Splitting channels...")
                             val splitWavs = WavHelper.splitMultichannelWav(
                                 inputFile = cachePcmFile,
                                 outputDir = exportsDir,
@@ -531,6 +588,8 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                         }
                         ExportMode.MonoFlacCustomSplit -> {
                             val tempSplitDir = File(context.cacheDir, "flac_splits").apply { mkdirs() }
+                            val currentState1 = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
+                            _uiState.value = currentState1.copy(progress = 0.99f, status = "Splitting to channel WAVs...")
                             val splitWavs = WavHelper.splitMultichannelWav(
                                 inputFile = cachePcmFile,
                                 outputDir = tempSplitDir,
@@ -541,7 +600,14 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                             )
                             
                             val flacFilesList = mutableListOf<File>()
-                            splitWavs.forEach { wav ->
+                            val totalChannels = activeMetadata.channelCount.toFloat()
+                            splitWavs.forEachIndexed { index, wav ->
+                                val n = index + 1
+                                val currentState2 = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
+                                _uiState.value = currentState2.copy(
+                                    progress = 0.99f + (n / totalChannels) * 0.005f,
+                                    status = "Encoding channel $n to FLAC..."
+                                )
                                 val flacFile = File(exportsDir, "${wav.nameWithoutExtension}.flac")
                                 val compressed = FlacEncoderHelper.encodeWavToFlac(
                                     wavFile = wav,
@@ -562,6 +628,8 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                             }
                             
                             // ZIP compressor integration
+                            val currentState3 = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
+                            _uiState.value = currentState3.copy(progress = 0.999f, status = "Compressing to ZIP archive...")
                             val zippedContainer = File(exportsDir, "${clearName}_split_flacs.zip")
                             ZipOutputStream(FileOutputStream(zippedContainer)).use { zos ->
                                 flacFilesList.forEach { flac ->
@@ -902,6 +970,12 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
             val chooser = Intent.createChooser(intent, "Share Exported Content")
             chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)
+        } catch (e: IllegalArgumentException) {
+            _uiState.value = UIState.Error(
+                message = "Export file could not be shared — it may have been cleaned up by the system. Please re-export and try again.",
+                onAction = { startDecoding() },
+                actionLabel = "Re-Export"
+            )
         } catch (e: Exception) {
             _uiState.value = UIState.Error("Sharing registry failed: ${e.localizedMessage}")
         }

@@ -50,8 +50,6 @@ object FlacEncoderHelper {
 
             fos = BufferedOutputStream(FileOutputStream(flacFile))
 
-            val inputBuffers = codec.inputBuffers
-            val outputBuffers = codec.outputBuffers
             val bufferInfo = MediaCodec.BufferInfo()
             
             val pcmFrameSize = channelCount * (bitsPerSample / 8)
@@ -59,13 +57,17 @@ object FlacEncoderHelper {
             
             var isInputEof = false
             var isOutputEof = false
+            var stallCount = 0
 
             while (!isOutputEof) {
+                var inputStalled = false
+                var outputStalled = false
+
                 // Feed input buffers
                 if (!isInputEof) {
                     val inputBufIndex = codec.dequeueInputBuffer(10000) // 10ms timeout
                     if (inputBufIndex >= 0) {
-                        val inputBuffer = inputBuffers[inputBufIndex]
+                        val inputBuffer = codec.getInputBuffer(inputBufIndex)!!
                         inputBuffer.clear()
                         
                         val bytesToRead = minOf(chunkBuffer.size, inputBuffer.capacity())
@@ -92,17 +94,17 @@ object FlacEncoderHelper {
                             processedBytes += bytesRead
                             onProgress(processedBytes.toFloat() / totalBytes)
                         }
+                    } else if (inputBufIndex == -1) {
+                        inputStalled = true
                     }
+                } else {
+                    inputStalled = true
                 }
 
                 // Retrieve output buffers
                 val outputBufIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
                 if (outputBufIndex >= 0) {
-                    val outputBuffer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                        codec.getOutputBuffer(outputBufIndex)
-                    } else {
-                        outputBuffers[outputBufIndex]
-                    }
+                    val outputBuffer = codec.getOutputBuffer(outputBufIndex)
 
                     if (outputBuffer != null && bufferInfo.size > 0) {
                         outputBuffer.position(bufferInfo.offset)
@@ -118,8 +120,19 @@ object FlacEncoderHelper {
                     if ((bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
                         isOutputEof = true
                     }
+                } else if (outputBufIndex == -1) {
+                    outputStalled = true
                 } else if (outputBufIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     // Output format changed
+                }
+
+                if (inputStalled && outputStalled) {
+                    stallCount++
+                    if (stallCount > 500) {
+                        break
+                    }
+                } else {
+                    stallCount = 0
                 }
             }
 

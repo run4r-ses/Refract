@@ -8,6 +8,16 @@ import java.nio.ByteOrder
 
 object WavHelper {
 
+    private fun readExactly(stream: java.io.InputStream, buf: ByteArray): Boolean {
+        var offset = 0
+        while (offset < buf.size) {
+            val n = stream.read(buf, offset, buf.size - offset)
+            if (n == -1) return false
+            offset += n
+        }
+        return true
+    }
+
     /**
      * Writes standard 44-byte WAV header.
      */
@@ -109,25 +119,18 @@ object WavHelper {
                 // Skip the header of the input file (assuming it has a 44-byte WAV header)
                 fis.skip(44)
                 
-                val buffer = ByteArray(inputFrameSize * 1024)
-                var bytesRead: Int
+                val buffer = ByteArray(inputFrameSize)
                 val dataSizes = LongArray(channelCount) { 0L }
 
-                while (fis.read(buffer).also { bytesRead = it } != -1) {
-                    val framesRead = bytesRead / inputFrameSize
-                    for (f in 0 until framesRead) {
-                        val frameOffset = f * inputFrameSize
-                        for (c in 0 until channelCount) {
-                            val sampleOffset = frameOffset + (c * inputSampleSize)
-                            if (sampleOffset + 1 < bytesRead) {
-                                val low = buffer[sampleOffset].toInt() and 0xFF
-                                val high = buffer[sampleOffset + 1].toInt()
-                                val sample16 = ((high shl 8) or low).toShort()
-                                
-                                writeSample(fileStreams[c], sample16, bitsPerSample)
-                                dataSizes[c] += outputSampleSize
-                            }
-                        }
+                while (readExactly(fis, buffer)) {
+                    for (c in 0 until channelCount) {
+                        val sampleOffset = c * inputSampleSize
+                        val low = buffer[sampleOffset].toInt() and 0xFF
+                        val high = buffer[sampleOffset + 1].toInt()
+                        val sample16 = ((high shl 8) or low).toShort()
+                        
+                        writeSample(fileStreams[c], sample16, bitsPerSample)
+                        dataSizes[c] += outputSampleSize
                     }
                 }
                 
@@ -203,7 +206,7 @@ object WavHelper {
                 
                 val frameBuffer = ByteArray(inputFrameSize)
                 
-                while (fis.read(frameBuffer) == inputFrameSize) {
+                while (readExactly(fis, frameBuffer)) {
                     // Read 16-bit PCM values
                     val channels = ShortArray(sourceChannelCount)
                     for (c in 0 until sourceChannelCount) {
