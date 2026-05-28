@@ -220,6 +220,15 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
     private var wakeLock: PowerManager.WakeLock? = null
     private var audioManager: AudioManager? = null
     private var audioFocusRequest: AudioFocusRequest? = null
+    private var decodingJob: Job? = null
+
+    private val cancelReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == "com.example.refract.CANCEL_DECODING_EVENT") {
+                cancelDecoding()
+            }
+        }
+    }
 
     data class RecentFileRecord(
         val name: String,
@@ -237,6 +246,13 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         checkDecoderSupport()
         loadHistory()
         loadRecentDocs()
+
+        val cancelFilter = android.content.IntentFilter("com.example.refract.CANCEL_DECODING_EVENT")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            application.registerReceiver(cancelReceiver, cancelFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            application.registerReceiver(cancelReceiver, cancelFilter)
+        }
     }
 
     private fun initWakeLock(context: Context) {
@@ -415,7 +431,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 val name = getFileNameFromUri(context, uri) ?: "refract_atmos_stream.ac4"
                 onStopAudio()
                 
-                _uiState.value = UIState.Processing(name, 0f, "Aligning hardware and virtual codecs...")
+                _uiState.value = UIState.Processing(name, 0f, "Reading file...")
                 delay(400) // Aesthetic delay for seamless UI transitions
                 val metadata = DolbyAc4Decoder.extractMetadata(context, uri)
                 
@@ -449,7 +465,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 if (e is SecurityException || e.message?.contains("Permission", ignoreCase = true) == true) {
                     _uiState.value = UIState.Error("File access was denied. Please re-select the file from the file picker.")
                 } else {
-                    _uiState.value = UIState.Error("Diagnostic bitstream parsing failed: ${e.localizedMessage}")
+                    _uiState.value = UIState.Error("Could not read file: ${e.localizedMessage}")
                 }
             }
         }
@@ -462,7 +478,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         _selectedPresentationIndex.value = index
         viewModelScope.launch {
             // Simulated transition indicating presentation stream re-buffering/decoding is active
-            _uiState.value = UIState.Processing(state.name, 0f, "Remuxing program channel maps for: ${availablePresentations.value[index].label}...")
+            _uiState.value = UIState.Processing(state.name, 0f, "Switching to: ${availablePresentations.value[index].label}...")
             delay(1000)
             
             val updatedMetadata = state.metadata.copy(
@@ -476,7 +492,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
     fun getExportsDir(): File {
         val context = getApplication<Application>()
         val privateDir = File(context.filesDir, "exports").apply { mkdirs() }
-        _exportLocationLabel.value = "MediaStore.Downloads"
+        _exportLocationLabel.value = "Downloads/Refract"
         return privateDir
     }
 
@@ -502,9 +518,19 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         if (state !is UIState.FileSelected) return
 
         val context = getApplication<Application>()
-        viewModelScope.launch {
-            _uiState.value = UIState.Processing(state.name, 0f, "Initializing local decoding vectors...")
+        decodingJob?.cancel()
+        decodingJob = viewModelScope.launch {
+            _uiState.value = UIState.Processing(state.name, 0f, "Starting decoder...")
             
+            val displayName = state.name.take(24) + if (state.name.length > 24) "..." else ""
+            val intent = Intent(context, com.example.DecodingForegroundService::class.java)
+                .putExtra("extra_file_name", state.name)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+
             try {
                 val cachePcmFile = File(context.cacheDir, "temp_render.wav")
                 if (cachePcmFile.exists()) cachePcmFile.delete()
@@ -525,15 +551,23 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                                 } else {
                                     12
                                 }
+                                val progressPercent = (progress * 100).toInt()
                                 _uiState.value = currentState.copy(
                                     progress = progress,
-                                    status = "Decompressing spatial metadata channels (${String.format(Locale.getDefault(), "%.1f", progress * 100f)}%)...",
+                                    status = "Decoding audio... (${String.format(Locale.getDefault(), "%.1f", progress * 100f)}%)",
                                     estSecondsRemaining = estRemaining.coerceIn(1, 120)
+                                )
+                                
+                                val notifProgress = (progress * 90).toInt()
+                                com.example.DecodingForegroundService.updateProgress(
+                                    context,
+                                    notifProgress,
+                                    "$displayName · Decoding ($progressPercent%)"
                                 )
                             }
                         },
                         onStatusUpdate = { status ->
-                            if (status == "5.1 core extraction · Software fallback") {
+                            if (status == "5.1 core extraction · Software fallback" || status == "DD+ 5.1 core · Software fallback") {
                                 _showAtmosFallbackBanner.value = true
                             }
                             val currentState = _uiState.value
@@ -552,6 +586,16 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 val presLabel = activePres?.label ?: "Standard"
 
                 val reportFile = File(exportsDir, "${clearName}_Refract_Report.txt")
+
+                _uiState.value = (_uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.90f, "")).copy(
+                    progress = 0.95f,
+                    status = "Writing file..."
+                )
+                com.example.DecodingForegroundService.updateProgress(
+                    context,
+                    95,
+                    "$displayName · Writing export files..."
+                )
 
                 withContext(Dispatchers.IO) {
                     when (_exportMode.value) {
@@ -677,12 +721,14 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                     reportFile = if (_isLoudnessReportEnabled.value) reportFile else null
                 )
                 loadHistory()
+                com.example.DecodingForegroundService.completeNotification(context, state.name, true)
 
             } catch (e: Exception) {
+                com.example.DecodingForegroundService.completeNotification(context, state.name, false)
                 if (e is SecurityException || e.message?.contains("Permission", ignoreCase = true) == true) {
                     _uiState.value = UIState.Error("File access was denied. Please re-select the file from the file picker.")
                 } else {
-                    _uiState.value = UIState.Error("Immersive processing pipe crash: ${e.localizedMessage}")
+                    _uiState.value = UIState.Error("Export error: ${e.localizedMessage}")
                 }
             }
         }
@@ -893,7 +939,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
 
             // Report elements don't play
             if (file.extension == "txt") {
-                _uiState.value = UIState.Error("Cannot play textual diagnostics log. Open inside Android log viewer instead.")
+                _uiState.value = UIState.Error("This is a text report — open it in a text viewer to read it.")
                 return
             }
 
@@ -977,7 +1023,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 actionLabel = "Re-Export"
             )
         } catch (e: Exception) {
-            _uiState.value = UIState.Error("Sharing registry failed: ${e.localizedMessage}")
+            _uiState.value = UIState.Error("Could not share file: ${e.localizedMessage}")
         }
     }
 
@@ -1003,8 +1049,39 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         return name
     }
 
+    fun cancelDecoding() {
+        decodingJob?.cancel()
+        decodingJob = null
+        
+        val context = getApplication<Application>()
+        // Also cancel the notification and service
+        try {
+            context.stopService(Intent(context, com.example.DecodingForegroundService::class.java))
+        } catch (e: Exception) {
+            // ignore
+        }
+        
+        val state = _uiState.value
+        if (state is UIState.Processing) {
+            _uiState.value = UIState.Idle
+        }
+        
+        // Clean up any temp cache/transient WAV rendering
+        try {
+            val cachePcmFile = File(context.cacheDir, "temp_render.wav")
+            if (cachePcmFile.exists()) cachePcmFile.delete()
+        } catch (e: Exception) {
+            // silent cleanup
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
         onStopAudio()
+        try {
+            getApplication<Application>().unregisterReceiver(cancelReceiver)
+        } catch (e: Exception) {
+            // ignore
+        }
     }
 }

@@ -380,7 +380,7 @@ fun DecoderAppScreen(
                                 // Real recent documents library
                                 if (recentDocsList.isNotEmpty()) {
                                     Text(
-                                        text = "RECENT DOCUMENTS",
+                                        text = "RECENT FILES",
                                         style = MaterialTheme.typography.labelMedium,
                                         color = CyberCyan,
                                         fontWeight = FontWeight.Bold,
@@ -676,8 +676,6 @@ fun AnimatedCodecRow(
             color = statusColor,
             fontSize = 11.sp,
             fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f, fill = false).padding(start = 12.dp)
         )
     }
@@ -795,7 +793,7 @@ fun CapabilitiesHardwareCard(
                 val isEac3Hw = hasEac3 && !eac3DecoderName.contains("google", ignoreCase = true)
                 AnimatedCodecRow(
                     title = "E-AC3-JOC (Dolby Atmos Objects)",
-                    statusText = if (hasEac3) (if (isEac3Hw) "✅ Hardware ($eac3DecoderName)" else "✅ Software Fallback ($eac3DecoderName)") else "⚠️ Emulated Engine",
+                    statusText = if (hasEac3) (if (isEac3Hw) "✅ Hardware ($eac3DecoderName)" else "✅ Software Fallback ($eac3DecoderName)") else "⚠️ Emulated (no hardware decoder)",
                     statusColor = if (hasEac3) (if (isEac3Hw) AcidGreen else CyberCyan) else PurpleGlow,
                     isReducedMotion = isReducedMotion,
                     delayMs = 0,
@@ -809,7 +807,7 @@ fun CapabilitiesHardwareCard(
                 } ?: CodecDetail(ac4DecoderName, "audio/ac4", false, 0)
                 AnimatedCodecRow(
                     title = "AC-4 IMS Binaural",
-                    statusText = if (hasAc4) "✅ Native ($ac4DecoderName)" else "✅ Software fallback active",
+                    statusText = if (hasAc4) "✅ Native ($ac4DecoderName)" else "✅ Software fallback",
                     statusColor = if (hasAc4) AcidGreen else CyberCyan,
                     isReducedMotion = isReducedMotion,
                     delayMs = 80,
@@ -819,7 +817,7 @@ fun CapabilitiesHardwareCard(
                 AnimatedCodecRow(
                     title = "AC-4 L4 Multichannel Support",
                     statusText = if (Build.VERSION.SDK_INT >= 36) {
-                        if (hasAc4) "✅ Native Hardware (Android 16)" else "⚠️ API 36 (Codecs absent)"
+                        if (hasAc4) "✅ Native hardware" else "⚠️ Requires Android 16 · No decoder found"
                     } else {
                         "⚠️ Requires Android 16 (you are on Android ${Build.VERSION.SDK_INT})"
                     },
@@ -974,7 +972,7 @@ fun FileDropzoneSelector(
                 Spacer(modifier = Modifier.height(10.dp))
                 
                 Text(
-                    text = "SELECT SOUND STREAM PORT",
+                    text = "Open Audio File",
                     color = IceWhite,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
@@ -1415,7 +1413,7 @@ fun FileSelectedCard(
 
             // Target Export Configuration Selection
             Text(
-                text = "CONTAINER EXPORT MODAL OPTIONS",
+                text = "Export Format",
                 fontWeight = FontWeight.Bold,
                 color = CyberCyan,
                 fontSize = 11.sp,
@@ -1428,28 +1426,28 @@ fun FileSelectedCard(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ExportModeOptionTile(
-                    title = "Stereo Downmix (Binaural Mode)",
+                    title = "Stereo Downmix",
                     desc = "Downmixes discrete sound coordinates into spatialized binaural stereo WAV (Recommended for regular headphones).",
                     selected = selectedMode == AudioDecoderViewModel.ExportMode.StereoBinauralWav,
                     onClick = { onModeSelect(AudioDecoderViewModel.ExportMode.StereoBinauralWav) }
                 )
 
                 ExportModeOptionTile(
-                    title = "Unified Multichannel (Interleaved WAV)",
+                    title = "Multichannel WAV",
                     desc = "Generates a single multichannel uncompressed WAV preserving layout mapping coordinates (Ideal for DAW editing).",
                     selected = selectedMode == AudioDecoderViewModel.ExportMode.WaveMultichannel,
                     onClick = { onModeSelect(AudioDecoderViewModel.ExportMode.WaveMultichannel) }
                 )
 
                 ExportModeOptionTile(
-                    title = "Split Mono Channels (Uncompressed WAV)",
+                    title = "Split WAV (per channel)",
                     desc = "Splits each audio track coordinate into individual discrete mono WAV files.",
                     selected = selectedMode == AudioDecoderViewModel.ExportMode.MonoWavCustomSplit,
                     onClick = { onModeSelect(AudioDecoderViewModel.ExportMode.MonoWavCustomSplit) }
                 )
 
                 ExportModeOptionTile(
-                    title = "Split Mono Lossless Zip (FLAC Archive)",
+                    title = "Split FLAC (zipped)",
                     desc = "Compresses and encapsulates split channel flacs natively into a single manageable .zip archive.",
                     selected = selectedMode == AudioDecoderViewModel.ExportMode.MonoFlacCustomSplit,
                     onClick = { onModeSelect(AudioDecoderViewModel.ExportMode.MonoFlacCustomSplit) }
@@ -1468,7 +1466,7 @@ fun FileSelectedCard(
                 shape = RoundedCornerShape(10.dp)
             ) {
                 Text(
-                    text = "START EXTRACTION PIPELINE",
+                    text = "Export",
                     color = SlateGrayBg,
                     fontWeight = FontWeight.Black,
                     letterSpacing = 1.sp
@@ -2158,12 +2156,12 @@ fun SystemSettingsDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("CLOSE SETTINGS", color = CyberCyan, fontWeight = FontWeight.Bold)
+                Text("Done", color = CyberCyan, fontWeight = FontWeight.Bold)
             }
         },
         title = {
             Text(
-                "REFRACT LABORATORY LAWS",
+                "SETTINGS",
                 color = IceWhite,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Black
@@ -2178,8 +2176,8 @@ fun SystemSettingsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Interactive Waveform Peak-Renderer", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Draws high density visual packet nodes (Pinch / drag active)", color = CoolGrayText, fontSize = 9.sp)
+                        Text("Waveform Display", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Show audio waveform with pinch-to-zoom and tap-to-seek", color = CoolGrayText, fontSize = 9.sp)
                     }
                     Switch(
                         checked = waveformMode,
@@ -2197,8 +2195,8 @@ fun SystemSettingsDialog(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
-                        Text("Generate Loudness Analysis Report", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                        Text("Creates a professional BS.1770-4 LKFS audit checklist text file", color = CoolGrayText, fontSize = 9.sp)
+                        Text("Export Loudness Report", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        Text("Saves a BS.1770-4 loudness summary alongside exported audio", color = CoolGrayText, fontSize = 9.sp)
                     }
                     Switch(
                         checked = isLoudnessReportEnabled,
@@ -2211,7 +2209,7 @@ fun SystemSettingsDialog(
 
                 // Select quantization depth resolution
                 Column {
-                    Text("Default PCM Quantization Bit-Depth", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Bit Depth", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(16, 24, 32).forEach { depth ->
@@ -2235,7 +2233,7 @@ fun SystemSettingsDialog(
 
                 // Select default resampling rate
                 Column {
-                    Text("Default Sampling Rate Frequency", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Sample Rate", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(48000, 96000).forEach { freq ->
@@ -2259,8 +2257,8 @@ fun SystemSettingsDialog(
 
                 // Export directory indicator
                 Column {
-                    Text("Default Export Folder Directory", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    Text("Auto-creates target directories safely inside sandbox downloads", color = CoolGrayText, fontSize = 9.sp)
+                    Text("Export Folder", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Files are saved here after export", color = CoolGrayText, fontSize = 9.sp)
                     Spacer(modifier = Modifier.height(6.dp))
                     Box(
                         modifier = Modifier
@@ -2297,7 +2295,7 @@ fun SystemSettingsDialog(
                 ) {
                     Icon(imageVector = Icons.Default.Delete, contentDescription = "clear history", modifier = Modifier.size(16.dp))
                     Spacer(modifier = Modifier.width(6.dp))
-                    Text("ERASE AUDIT HISTORY & DEC PREFS", fontSize = 11.sp, fontWeight = FontWeight.Black)
+                    Text("CLEAR HISTORY & RESET SETTINGS", fontSize = 11.sp, fontWeight = FontWeight.Black)
                 }
             }
         },
@@ -2313,12 +2311,12 @@ fun HardwareInfoDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("UNDERSTOOD", color = CyberCyan, fontWeight = FontWeight.Black)
+                Text("OK", color = CyberCyan, fontWeight = FontWeight.Bold)
             }
         },
         title = {
             Text(
-                "HARDWARE IMPLICATIONS GUIDE",
+                "DOLBY DECODER GUIDE",
                 color = IceWhite,
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold
@@ -2328,23 +2326,21 @@ fun HardwareInfoDialog(
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
                     "• Hardware vs Software Decoders:\n" +
-                    "Hardware implementations utilize dynamic power chips on mobile matrices (such as OMX.qcom or Exynos) to accelerate Dolby Digital/Plus streams with low thermal limits.\n" +
-                    "Software configurations utilize local floating compilations (simulation fallback logic) to parse stream channels.",
+                    "Hardware decoders use the device's dedicated audio processors to decode Dolby formats efficiently. Software decoders use the CPU to process the audio stream, which can use more battery but serves as a reliable fallback.",
                     color = IceWhite,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
                 )
                 Text(
                     "• E-AC3-JOC (Dolby Atmos):\n" +
-                    "E-AC3 with JOC (Joint Object Coding) encapsulates spatial metadata overlays. Standard decoders split discrete bed layouts, while Refract can recreate actual spatial panning streams.",
+                    "E-AC3 with JOC (Joint Object Coding) delivers immersive spatial audio. Devices with hardware support can decode full spatial mixes, while software decoders will fallback to standard 5.1 multichannel audio.",
                     color = IceWhite,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
                 )
                 Text(
                     "• Dolby AC-4 Profiles:\n" +
-                    "AC-4 IMS is designed for Immersive Stereo Binaural environments, ideal for headphones.\n" +
-                    "AC-4 L4 supports discrete multichannel up to 7.1.4 heights, requiring Android 16 (API 36) compatibility for native hardware operations.",
+                    "AC-4 IMS (Immersive Stereo) decodes spatial audio downmixed for standard headphones. AC-4 L4 supports discrete multichannel layouts (such as 5.1.4 or 7.1.4) which require native hardware support available in Android 16 (API 36).",
                     color = IceWhite,
                     fontSize = 11.sp,
                     lineHeight = 15.sp
@@ -2440,7 +2436,7 @@ fun ErrorDisplayCard(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            Text("DECODING PIPELINE ERROR", color = RedAlert, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+            Text("Export Failed", color = RedAlert, fontWeight = FontWeight.Bold, fontSize = 13.sp)
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -2636,13 +2632,13 @@ fun EmptyHistoryCard() {
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                "No decoded audio components found",
+                "No exported files yet",
                 color = CoolGrayText,
                 fontWeight = FontWeight.Bold,
                 fontSize = 12.sp
             )
             Text(
-                "Processed layers and zipped folders will record here.",
+                "Your decoded and exported audio files will appear here.",
                 color = CoolGrayText.copy(alpha = 0.6f),
                 fontSize = 10.sp,
                 modifier = Modifier.padding(top = 2.dp)

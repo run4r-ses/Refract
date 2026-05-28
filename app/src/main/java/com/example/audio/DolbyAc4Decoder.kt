@@ -263,14 +263,14 @@ object DolbyAc4Decoder {
 
             val codecName: String
             if (isEac3 && hasHardwareObjectDecoder) {
-                onStatusUpdate("Object rendering · Hardware")
+                onStatusUpdate("Atmos objects · Hardware decoder")
                 codecName = supportInfo.availableCodecs.first { it.mimeType.contains("eac3", ignoreCase = true) && !it.isEncoder && it.name.lowercase(Locale.getDefault()).contains("google").not() }.name
                 codec = MediaCodec.createByCodecName(codecName)
             } else if (isEac3 && !hasHardwareObjectDecoder) {
-                onStatusUpdate("5.1 core extraction · Software fallback")
+                onStatusUpdate("DD+ 5.1 core · Software fallback")
                 codec = MediaCodec.createDecoderByType(mime)
             } else {
-                onStatusUpdate("Configuring native Dolby AC-4 decoder...")
+                onStatusUpdate("Configuring decoder...")
                 codec = MediaCodec.createDecoderByType(mime) // Try standard type allocation
             }
 
@@ -294,7 +294,7 @@ object DolbyAc4Decoder {
             var isOutputEos = false
             var totalDataBytes = 0L
             
-            onStatusUpdate("Decoding Audio Frame Buffer...")
+            onStatusUpdate("Decoding audio...")
 
             while (!isOutputEos && coroutineContext.isActive) {
                 if (!isInputEos) {
@@ -363,7 +363,7 @@ object DolbyAc4Decoder {
             bos = null
 
             // Write actual file size into WAV header
-            onStatusUpdate("Finalizing exported structure...")
+            onStatusUpdate("Writing file...")
             WavHelper.updateWavHeaderSizes(outputPcmFile, totalDataBytes)
 
             val profile = if (channelCount == 2) {
