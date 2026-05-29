@@ -17,9 +17,9 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.audio.DecoderSupportInfo
 import com.example.audio.DolbyAc4Decoder
-import com.example.audio.FlacEncoderHelper
 import com.example.audio.WavHelper
 import com.example.audio.FfmpegExportHelper
+import com.example.DecodingForegroundService
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -144,6 +144,9 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
 
     private val _exportMode = MutableStateFlow(ExportMode.StereoBinauralWav)
     val exportMode: StateFlow<ExportMode> = _exportMode.asStateFlow()
+
+    private val _exportFlacStereo = MutableStateFlow(false)
+    val exportFlacStereo: StateFlow<Boolean> = _exportFlacStereo.asStateFlow()
 
     private val _showAtmosFallbackBanner = MutableStateFlow(false)
     val showAtmosFallbackBanner: StateFlow<Boolean> = _showAtmosFallbackBanner.asStateFlow()
@@ -292,6 +295,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         _defaultBitDepth.value = prefs.getInt("default_bit_depth", 16)
         _defaultSampleRate.value = prefs.getInt("default_sample_rate", 48000)
         _isLoudnessReportEnabled.value = prefs.getBoolean("loudness_report_enabled", false)
+        _exportFlacStereo.value = prefs.getBoolean("export_flac_stereo", false)
         _exportLocationLabel.value = prefs.getString("export_folder", "Downloads/DolbyRefPlayer") ?: "Downloads/DolbyRefPlayer"
         val expModeName = prefs.getString("export_mode", ExportMode.StereoBinauralWav.name)
         _exportMode.value = try {
@@ -328,6 +332,11 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
     fun setLoudnessReportEnabled(enabled: Boolean) {
         _isLoudnessReportEnabled.value = enabled
         prefs.edit().putBoolean("loudness_report_enabled", enabled).apply()
+    }
+
+    fun setExportFlacStereo(enabled: Boolean) {
+        _exportFlacStereo.value = enabled
+        prefs.edit().putBoolean("export_flac_stereo", enabled).apply()
     }
 
     fun dismissFallbackBanner() {
@@ -565,7 +574,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                         outputPcmFile = cachePcmFile,
                         targetBitsPerSample = _defaultBitDepth.value,
                         onProgress = { progress ->
-                            withContext(Dispatchers.Main) {
+                            viewModelScope.launch(Dispatchers.Main) {
                                 val currentState = _uiState.value
                                 if (currentState is UIState.Processing) {
                                     val elapsedSec = (System.currentTimeMillis() - startTime) / 1000f
@@ -623,121 +632,83 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                     "$displayName · Writing export files..."
                 )
 
+                val processingState = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.95f, "Writing file...")
+
                 when (_exportMode.value) {
                     ExportMode.WaveMultichannel -> {
-                        val destFile = File(exportsDir, "${clearName}_multichannel.wav")
                         withContext(Dispatchers.IO) {
+                            val destFile = File(exportsDir, "${clearName}_multichannel.wav")
                             cachePcmFile.copyTo(destFile, overwrite = true)
+                            finalFiles.add(destFile)
                         }
-                        finalFiles.add(destFile)
                     }
                     ExportMode.StereoBinauralWav -> {
-                        val currentState = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
-                        _uiState.value = currentState.copy(progress = 0.99f, status = "Downmixing to stereo...")
-                        val destFile = File(exportsDir, "${clearName}_stereo_binaural.wav")
-                        withContext(Dispatchers.IO) {
-                            if (!FfmpegExportHelper.downmixToStereo(cachePcmFile, destFile)) {
-                                WavHelper.downmixToStereWav(
-                                    inputFile = cachePcmFile,
-                                    outputFile = destFile,
-                                    sourceChannelCount = activeMetadata.channelCount,
-                                    sampleRate = _defaultSampleRate.value,
-                                    bitsPerSample = _defaultBitDepth.value
-                                )
-                            }
+                        withContext(Dispatchers.Main) {
+                            _uiState.value = processingState.copy(
+                                progress = 0.97f, status = "Downmixing to stereo...")
                         }
-                        finalFiles.add(destFile)
+                        val ext = if (_exportFlacStereo.value) "flac" else "wav"
+                        val destFile = File(exportsDir, "${clearName}_stereo.$ext")
+                        withContext(Dispatchers.IO) {
+                            val ok = FfmpegExportHelper.stereoDownmix(
+                                cachePcmFile, destFile,
+                                _defaultSampleRate.value,
+                                _defaultBitDepth.value,
+                                asFlac = _exportFlacStereo.value
+                            )
+                            if (ok) finalFiles.add(destFile)
+                            else throw Exception("Stereo downmix failed — check ffmpeg logs")
+                        }
                     }
                     ExportMode.MonoWavCustomSplit -> {
-                        val currentState = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
-                        _uiState.value = currentState.copy(progress = 0.99f, status = "Splitting channels...")
-                        val splitWavs = withContext(Dispatchers.IO) {
-                            FfmpegExportHelper.splitMultichannel(cachePcmFile, exportsDir, clearName, activeMetadata.channelCount)
-                                ?: WavHelper.splitMultichannelWav(
-                                    inputFile = cachePcmFile,
-                                    outputDir = exportsDir,
-                                    baseName = clearName,
-                                    channelCount = activeMetadata.channelCount,
-                                    sampleRate = _defaultSampleRate.value,
-                                    bitsPerSample = _defaultBitDepth.value
-                                )
+                        withContext(Dispatchers.Main) {
+                            _uiState.value = processingState.copy(
+                                progress = 0.97f, status = "Splitting channels...")
                         }
-                        finalFiles.addAll(splitWavs)
+                        withContext(Dispatchers.IO) {
+                            val splits = FfmpegExportHelper.splitChannels(
+                                cachePcmFile, exportsDir, clearName,
+                                activeMetadata.channelCount,
+                                _defaultSampleRate.value,
+                                _defaultBitDepth.value,
+                                asFlac = false
+                            ) { done, total ->
+                                DecodingForegroundService.updateProgress(
+                                    context, 97 + (done * 2 / total),
+                                    "Splitting channel $done of $total...")
+                            }
+                            finalFiles.addAll(splits)
+                        }
                     }
                     ExportMode.MonoFlacCustomSplit -> {
-                        val tempSplitDir = File(context.cacheDir, "flac_splits").apply { mkdirs() }
-                        val currentState1 = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
-                        _uiState.value = currentState1.copy(progress = 0.99f, status = "Splitting to channel WAVs...")
-                        val splitWavs = withContext(Dispatchers.IO) {
-                            FfmpegExportHelper.splitMultichannel(cachePcmFile, tempSplitDir, clearName, activeMetadata.channelCount)
-                                ?: WavHelper.splitMultichannelWav(
-                                    inputFile = cachePcmFile,
-                                    outputDir = tempSplitDir,
-                                    baseName = clearName,
-                                    channelCount = activeMetadata.channelCount,
-                                    sampleRate = _defaultSampleRate.value,
-                                    bitsPerSample = _defaultBitDepth.value
-                                )
+                        withContext(Dispatchers.Main) {
+                            _uiState.value = processingState.copy(
+                                progress = 0.97f, status = "Encoding FLAC channels...")
                         }
-                        
-                        val flacFilesList = mutableListOf<File>()
-                        val totalChannels = activeMetadata.channelCount.toFloat()
-                        splitWavs.forEachIndexed { index, wav ->
-                            val n = index + 1
-                            val currentState2 = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
-                            _uiState.value = currentState2.copy(
-                                progress = 0.99f + (n / totalChannels) * 0.005f,
-                                status = "Encoding channel $n to FLAC..."
-                            )
-                            val flacFile = File(exportsDir, "${wav.nameWithoutExtension}.flac")
-                            val compressed = withContext(Dispatchers.IO) {
-                                if (FfmpegExportHelper.encodeWavToFlac(wav, flacFile)) {
-                                    true
-                                } else {
-                                    FlacEncoderHelper.encodeWavToFlac(
-                                        wavFile = wav,
-                                        flacFile = flacFile,
-                                        channelCount = 1,
-                                        sampleRate = _defaultSampleRate.value,
-                                        bitsPerSample = _defaultBitDepth.value
-                                    )
-                                }
+                        val tempDir = File(context.cacheDir, "flac_splits").apply { mkdirs() }
+                        val splitFlacs = withContext(Dispatchers.IO) {
+                            FfmpegExportHelper.splitChannels(
+                                cachePcmFile, tempDir, clearName,
+                                activeMetadata.channelCount,
+                                _defaultSampleRate.value,
+                                _defaultBitDepth.value,
+                                asFlac = true
+                            ) { done, total ->
+                                DecodingForegroundService.updateProgress(
+                                    context, 97 + (done * 2 / total),
+                                    "FLAC encoding $done of $total channels...")
                             }
-                            if (compressed) {
-                                flacFilesList.add(flacFile)
-                            } else {
-                                // Safe copy backup
-                                val fallbackFlac = File(exportsDir, "${wav.nameWithoutExtension}_split.wav")
-                                withContext(Dispatchers.IO) {
-                                    wav.copyTo(fallbackFlac, overwrite = true)
-                                }
-                                flacFilesList.add(fallbackFlac)
-                            }
-                            wav.delete()
                         }
-                        
-                        // ZIP compressor integration
-                        val currentState3 = _uiState.value as? UIState.Processing ?: UIState.Processing(state.name, 0.98f, "")
-                        _uiState.value = currentState3.copy(progress = 0.999f, status = "Compressing to ZIP archive...")
-                        val zippedContainer = File(exportsDir, "${clearName}_split_flacs.zip")
+                        withContext(Dispatchers.Main) {
+                            _uiState.value = processingState.copy(
+                                progress = 0.99f, status = "Compressing to ZIP...")
+                        }
                         withContext(Dispatchers.IO) {
-                            ZipOutputStream(FileOutputStream(zippedContainer)).use { zos ->
-                                flacFilesList.forEach { flac ->
-                                    val entry = ZipEntry(flac.name)
-                                    zos.putNextEntry(entry)
-                                    FileInputStream(flac).use { fis ->
-                                        val zipBuf = ByteArray(4096)
-                                        var readBytes: Int
-                                        while (fis.read(zipBuf).also { readBytes = it } != -1) {
-                                            zos.write(zipBuf, 0, readBytes)
-                                        }
-                                    }
-                                    zos.closeEntry()
-                                    flac.delete() // Cleanup zipped file to minimize storage footprint
-                                }
-                            }
+                            val zipFile = File(exportsDir, 
+                                "${clearName}_SplitFLAC_${activeMetadata.channelCount}ch.zip")
+                            FfmpegExportHelper.zipFiles(splitFlacs, zipFile)
+                            finalFiles.add(zipFile)
                         }
-                        finalFiles.add(zippedContainer)
                     }
                 }
 

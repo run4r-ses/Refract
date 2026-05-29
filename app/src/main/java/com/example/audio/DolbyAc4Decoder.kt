@@ -318,7 +318,7 @@ object DolbyAc4Decoder {
             codec.configure(format, null, null, 0)
             codec.start()
 
-            bos = BufferedOutputStream(FileOutputStream(outputPcmFile))
+            bos = BufferedOutputStream(FileOutputStream(outputPcmFile), 256 * 1024) // 256KB write buffer
             var actualChannelCount = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
             var actualSampleRate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var actualBitsPerSample = 16
@@ -336,13 +336,15 @@ object DolbyAc4Decoder {
             var isInputEos = false
             var isOutputEos = false
             var totalDataBytes = 0L
+            var frameCount = 0
             
             onStatusUpdate("Decoding audio...")
 
             while (!isOutputEos && coroutineContext.isActive) {
-                yield()
+                if (frameCount % 50 == 0) yield()
+                frameCount++
                 if (!isInputEos) {
-                    val inputBufferIndex = codec.dequeueInputBuffer(10000)
+                    val inputBufferIndex = codec.dequeueInputBuffer(100000)
                     if (inputBufferIndex >= 0) {
                         val inputBuffer = inputBuffers[inputBufferIndex]
                         inputBuffer.clear()
@@ -368,13 +370,15 @@ object DolbyAc4Decoder {
                             )
                             extractor.advance()
                             
-                            val progress = if (durationUs > 0) presentationTimeUs.toFloat() / durationUs else 0f
-                            onProgress(progress.coerceIn(0f, 1f))
+                            if (frameCount % 30 == 0) {
+                                val progress = if (durationUs > 0) presentationTimeUs.toFloat() / durationUs else 0f
+                                onProgress(progress.coerceIn(0f, 1f))
+                            }
                         }
                     }
                 }
 
-                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 10000)
+                val outputBufferIndex = codec.dequeueOutputBuffer(bufferInfo, 100000)
                 if (outputBufferIndex >= 0) {
                     val outputBuffer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                         codec.getOutputBuffer(outputBufferIndex)
