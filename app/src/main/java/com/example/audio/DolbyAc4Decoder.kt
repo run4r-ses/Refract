@@ -415,6 +415,9 @@ object DolbyAc4Decoder {
                 codec = MediaCodec.createDecoderByType(mime) // Try standard type allocation
             }
 
+            // Force multichannel output if possible
+            format.setInteger("max-output-channel-count", 32)
+            
             codec.configure(format, null, null, 0)
             codec.start()
 

@@ -29,42 +29,69 @@ object FfmpegExportHelper {
         asFlac: Boolean,
         onChannelDone: (Int, Int) -> Unit = { _, _ -> }
     ): List<File> {
+        // We will output stereo pairs
+        // The Pair contains the left and right channel indices from the original file
         val defs = when (channelCount) {
-            1  -> listOf("Mono" to 0)
-            2  -> listOf("Front_L" to 0, "Front_R" to 1)
-            6  -> listOf("Front_L" to 0, "Front_R" to 1,
-                         "Center" to 2, "LFE" to 3,
-                         "Surround_L" to 4, "Surround_R" to 5)
-            8  -> listOf("Front_L" to 0, "Front_R" to 1,
-                         "Center" to 2, "LFE" to 3,
-                         "Surround_L" to 4, "Surround_R" to 5,
-                         "Rear_Surround_L" to 6, "Rear_Surround_R" to 7)
-            12 -> listOf("Front_L" to 0, "Front_R" to 1,
-                         "Center" to 2, "LFE" to 3,
-                         "Surround_L" to 4, "Surround_R" to 5,
-                         "Rear_Surround_L" to 6, "Rear_Surround_R" to 7,
-                         "Top_Front_L" to 8, "Top_Front_R" to 9,
-                         "Top_Mid_L" to 10, "Top_Mid_R" to 11)
-            16 -> listOf("Front_L" to 0, "Front_R" to 1,
-                         "Center" to 2, "LFE" to 3,
-                         "Surround_L" to 4, "Surround_R" to 5,
-                         "Rear_Surround_L" to 6, "Rear_Surround_R" to 7,
-                         "Top_Front_L" to 8, "Top_Front_R" to 9,
-                         "Top_Mid_L" to 10, "Top_Mid_R" to 11,
-                         "Top_Rear_L" to 12, "Top_Rear_R" to 13,
-                         "Wide_L" to 14, "Wide_R" to 15)
-            else -> (0 until channelCount).map { "Ch_${it+1}" to it }
+            1  -> listOf("Mono" to Pair(0, 0))
+            2  -> listOf("Front" to Pair(0, 1))
+            6  -> listOf("Front" to Pair(0, 1),
+                         "Center" to Pair(2, 2), 
+                         "LFE" to Pair(3, 3),
+                         "Surround" to Pair(4, 5))
+            8  -> listOf("Front" to Pair(0, 1),
+                         "Center" to Pair(2, 2), 
+                         "LFE" to Pair(3, 3),
+                         "Surround" to Pair(4, 5),
+                         "Rear_Surround" to Pair(6, 7))
+            10 -> listOf("Front" to Pair(0, 1),
+                         "Center" to Pair(2, 2),
+                         "LFE" to Pair(3, 3),
+                         "Surround" to Pair(4, 5),
+                         "Rear_Surround" to Pair(6, 7),
+                         "Top_Front" to Pair(8, 9))
+            12 -> listOf("Front" to Pair(0, 1),
+                         "Center" to Pair(2, 2), 
+                         "LFE" to Pair(3, 3),
+                         "Surround" to Pair(4, 5),
+                         "Rear_Surround" to Pair(6, 7),
+                         "Top_Front" to Pair(8, 9),
+                         "Top_Mid" to Pair(10, 11))
+            16 -> listOf("Front" to Pair(0, 1),
+                         "Center" to Pair(2, 2), 
+                         "LFE" to Pair(3, 3),
+                         "Surround" to Pair(4, 5),
+                         "Rear_Surround" to Pair(6, 7),
+                         "Top_Front" to Pair(8, 9),
+                         "Top_Mid" to Pair(10, 11),
+                         "Top_Rear" to Pair(12, 13),
+                         "Wide" to Pair(14, 15))
+            else -> {
+                val list = mutableListOf<Pair<String, Pair<Int, Int>>>()
+                var ch = 0
+                while (ch < channelCount) {
+                    if (ch + 1 < channelCount) {
+                        list.add("Ch_${ch+1}_${ch+2}" to Pair(ch, ch + 1))
+                        ch += 2
+                    } else {
+                        list.add("Ch_${ch+1}" to Pair(ch, ch))
+                        ch++
+                    }
+                }
+                list
+            }
         }
         if (!outputDir.exists()) outputDir.mkdirs()
         val ext = if (asFlac) "flac" else "wav"
         val codec = if (asFlac) "flac -compression_level 8"
                     else "pcm_s${bitsPerSample}le"
         val out = mutableListOf<File>()
-        defs.forEachIndexed { idx, (name, ch) ->
+        defs.forEachIndexed { idx, (name, channels) ->
             val f = File(outputDir, "${baseName}_${name}.$ext")
+            val cL = channels.first
+            val cR = channels.second
             val ok = run(
                 "-y -i \"${inputFile.absolutePath}\" " +
-                "-filter_complex \"[0:a]pan=mono|c0=c${ch}[o]\" " +
+                "-filter_complex \"[0:a]pan=stereo|c0=c${cL}|c1=c${cR}[o]\" " +
                 "-map \"[o]\" -ar $sampleRate -c:a $codec " +
                 "\"${f.absolutePath}\""
             )
