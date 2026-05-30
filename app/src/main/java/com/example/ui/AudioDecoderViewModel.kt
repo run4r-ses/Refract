@@ -470,7 +470,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 delay(400)
 
                 // Detect format key to route to the right extractor
-                val formatKey = SoftwareDecoderHelper.detectFormatKey(name, null)
+                val formatKey = SoftwareDecoderHelper.detectFormatKeyRobust(context, uri, name, null)
 
                 val metadata: DolbyAc4Decoder.DecodedMetadata = when (formatKey) {
                     "truehd" -> {
@@ -618,7 +618,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 }
 
                 val activeMetadata = withContext(Dispatchers.IO) {
-                    val formatKey = SoftwareDecoderHelper.detectFormatKey(state.name, state.metadata.mimeType)
+                    val formatKey = SoftwareDecoderHelper.detectFormatKeyRobust(context, state.uri, state.name, state.metadata.mimeType)
                     val hardwareLevel = deriveHardwareEnforcementLevel(_supportInfo.value)
 
                     val progLambda: suspend (Float) -> Unit = { progress ->

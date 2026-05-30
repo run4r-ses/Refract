@@ -129,29 +129,24 @@ object DtsDecoder {
 
             val cmd = "-y -i \"${tempInput.absolutePath}\" -vn $acArg-c:a $pcmCodec -ar $sampleRate \"${outputPcmFile.absolutePath}\""
 
+            var currentPct = 0f
             val session = FFmpegKit.executeAsync(
                 cmd,
                 { /* complete */ },
                 { /* log */ },
                 { stats ->
                     if (durationMs > 0) {
-                        val pct = (stats.time / durationMs).toFloat().coerceIn(0f, 1f)
+                        currentPct = (stats.time / durationMs).toFloat().coerceIn(0f, 1f)
                     }
                 }
             )
             
             // To be able to yield while decoding
-            while (!session.state.name.equals("COMPLETED") && !session.state.name.equals("FAILED")) {
+            while (!session.state.name.equals("COMPLETED") && !session.state.name.equals("FAILED") && !session.state.name.equals("KILLED")) {
                 yield()
-                delay(100)
-                if (durationMs > 0) {
-                    val statss = session.allStatistics
-                    if (statss.isNotEmpty()) {
-                        val pct = (statss.last().time / durationMs).toFloat().coerceIn(0f, 1f)
-                        withContext(Dispatchers.Main) {
-                            onProgress(pct)
-                        }
-                    }
+                delay(150)
+                withContext(Dispatchers.Main) {
+                    onProgress(currentPct)
                 }
             }
 

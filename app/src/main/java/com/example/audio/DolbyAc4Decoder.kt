@@ -417,10 +417,12 @@ object DolbyAc4Decoder {
             }
 
             // Force multichannel output if possible
-            if (targetChannelCount != null) {
-                format.setInteger("max-output-channel-count", targetChannelCount)
+            val outCh = targetChannelCount ?: 32
+            // Some hardware EAC3 decoders segfault if forced above 8 explicitly. Clamping for EAC3:
+            if (isEac3 && outCh > 8) {
+                format.setInteger("max-output-channel-count", 8)
             } else {
-                format.setInteger("max-output-channel-count", 32)
+                format.setInteger("max-output-channel-count", outCh)
             }
             
             codec.configure(format, null, null, 0)
@@ -618,27 +620,22 @@ object DolbyAc4Decoder {
             val acArg = if (targetChannelCount != null) "-ac $targetChannelCount " else ""
             val cmd = "-y -i \"${tempInput.absolutePath}\" -vn $acArg-c:a $pcmEncoding -ar $sampleRate \"${outputPcmFile.absolutePath}\""
             
+            var currentPct = 0f
             val session = FFmpegKit.executeAsync(cmd,
                 { /* completion — handled below */ },
                 { /* log */ },
                 { stats ->
                     if (durationMs > 0) {
-                        val pct = (stats.time / durationMs).toFloat().coerceIn(0f, 1f)
+                        currentPct = (stats.time / durationMs).toFloat().coerceIn(0f, 1f)
                     }
                 }
             )
             
-            while (!session.state.name.equals("COMPLETED") && !session.state.name.equals("FAILED")) {
+            while (!session.state.name.equals("COMPLETED") && !session.state.name.equals("FAILED") && !session.state.name.equals("KILLED")) {
                 yield()
-                delay(100)
-                if (durationMs > 0) {
-                    val statss = session.allStatistics
-                    if (statss.isNotEmpty()) {
-                        val pct = (statss.last().time / durationMs).toFloat().coerceIn(0f, 1f)
-                        withContext(Dispatchers.Main) {
-                            onProgress(pct)
-                        }
-                    }
+                delay(150)
+                withContext(Dispatchers.Main) {
+                    onProgress(currentPct)
                 }
             }
             
