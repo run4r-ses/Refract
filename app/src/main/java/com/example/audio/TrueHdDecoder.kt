@@ -3,10 +3,10 @@ package com.example.audio
 import android.content.Context
 import android.net.Uri
 import com.arthenica.ffmpegkit.FFmpegKit
-import com.arthenica.ffmpegkit.FFmpegKitConfig
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 import java.io.File
@@ -30,58 +30,46 @@ object TrueHdDecoder {
     fun isTrueHdFile(fileName: String): Boolean {
         val ext = fileName.substringAfterLast('.', "").lowercase()
         val lower = fileName.lowercase()
-        return ext in setOf("thd", "mlp", "truehd", "mka", "mkv") || lower.contains("truehd") || lower.contains("atmos")
+        // Only match unambiguous TrueHD-specific extensions or the substring "truehd".
+        // Do NOT match "atmos" (AC-4/EAC3 files frequently carry that word),
+        // and do NOT match container extensions (.mkv, .mka) since they carry no codec info.
+        return ext in setOf("thd", "mlp", "truehd") || lower.contains("truehd")
     }
 
     fun extractMetadata(context: Context, fileUri: Uri): DecodedMetadata {
         val tempFile = SoftwareDecoderHelper.copyUriToTemp(context, fileUri, "truehd_probe.thd")
         return try {
-            val probeSession = FFprobeKit.execute("-v quiet -print_format json -show_streams \"${tempFile.absolutePath}\"")
-            var channels = 8
-            var sampleRate = 48000
-            var durationUs = 0L
-            var bitRate = 0
-            var codecName = ""
-            try {
-                val output = probeSession.output ?: ""
-                val chMatch = Regex("\"channels\"\\s*:\\s*(\\d+)").find(output)
-                val srMatch = Regex("\"sample_rate\"\\s*:\\s*\"(\\d+)\"").find(output)
-                val durMatch = Regex("\"duration\"\\s*:\\s*\"([0-9.]+)\"").find(output)
-                val brMatch = Regex("\"bit_rate\"\\s*:\\s*\"(\\d+)\"").find(output)
-                val cnMatch = Regex("\"codec_name\"\\s*:\\s*\"([^\"]+)\"").find(output)
-
-                channels = chMatch?.groupValues?.get(1)?.toIntOrNull() ?: channels
-                sampleRate = srMatch?.groupValues?.get(1)?.toIntOrNull() ?: sampleRate
-                durationUs = ((durMatch?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0) * 1_000_000).toLong()
-                bitRate = brMatch?.groupValues?.get(1)?.toIntOrNull() ?: bitRate
-                codecName = cnMatch?.groupValues?.get(1) ?: codecName
-            } catch (e: Exception) {
-            }
-
-            var isSimulated = false
-            if (channels == 0 || sampleRate == 0) {
-                isSimulated = true
-                channels = 8
-                sampleRate = 48000
-            }
-
-            val isAtmos = codecName.contains("atmos", ignoreCase = true) || 
-                          fileUri.lastPathSegment?.contains("atmos", ignoreCase = true) == true
-            
-            val profile = if (isAtmos) "TrueHD $channels.1 Atmos" else "TrueHD $channels.1"
-
-            DecodedMetadata(
-                mimeType = "audio/true-hd",
-                channelCount = channels,
-                sampleRate = sampleRate,
-                durationUs = durationUs,
-                profile = profile,
-                bitRate = bitRate,
-                isSimulated = isSimulated
-            )
+            extractMetadataFromFile(tempFile)
         } finally {
             tempFile.delete()
         }
+    }
+
+    private fun extractMetadataFromFile(file: File): DecodedMetadata {
+        val probeSession = FFprobeKit.execute(
+            "-v quiet -print_format json -show_streams \"${file.absolutePath}\""
+        )
+        var channels = 8; var sampleRate = 48000; var durationUs = 0L; var bitRate = 0; var codecName = ""
+        try {
+            val output = probeSession.output ?: ""
+            channels = Regex("\"channels\"\\s*:\\s*(\\d+)").find(output)?.groupValues?.get(1)?.toIntOrNull() ?: channels
+            sampleRate = Regex("\"sample_rate\"\\s*:\\s*\"(\\d+)\"").find(output)?.groupValues?.get(1)?.toIntOrNull() ?: sampleRate
+            durationUs = ((Regex("\"duration\"\\s*:\\s*\"([0-9.]+)\"").find(output)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0) * 1_000_000).toLong()
+            bitRate = Regex("\"bit_rate\"\\s*:\\s*\"(\\d+)\"").find(output)?.groupValues?.get(1)?.toIntOrNull() ?: bitRate
+            codecName = Regex("\"codec_name\"\\s*:\\s*\"([^\"]+)\"").find(output)?.groupValues?.get(1) ?: ""
+        } catch (_: Exception) {}
+
+        val isSimulated = channels == 0 || sampleRate == 0
+        if (isSimulated) { channels = 8; sampleRate = 48000 }
+
+        val isAtmos = codecName.contains("atmos", ignoreCase = true) ||
+                      file.name.contains("atmos", ignoreCase = true)
+        val profile = if (isAtmos) "TrueHD ${channels}ch Atmos" else "TrueHD ${channels}ch"
+
+        return DecodedMetadata(
+            mimeType = "audio/true-hd", channelCount = channels, sampleRate = sampleRate,
+            durationUs = durationUs, profile = profile, bitRate = bitRate, isSimulated = isSimulated
+        )
     }
 
     suspend fun decode(
@@ -98,7 +86,7 @@ object TrueHdDecoder {
                 onStatusUpdate("TrueHD lossless · FFmpeg software decoder")
             }
             
-            val metadata = extractMetadata(context, inputUri)
+            val metadata = extractMetadataFromFile(tempInput)
             val durationMs = metadata.durationUs / 1000.0
 
             val pcmCodec = when (targetBitsPerSample) {
@@ -125,7 +113,7 @@ object TrueHdDecoder {
             // To be able to yield while decoding
             while (!session.state.name.equals("COMPLETED") && !session.state.name.equals("FAILED")) {
                 yield()
-                Thread.sleep(100)
+                delay(100)
                 if (durationMs > 0) {
                     val statss = session.allStatistics
                     if (statss.isNotEmpty()) {

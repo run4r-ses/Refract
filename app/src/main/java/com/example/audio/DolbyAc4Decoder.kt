@@ -12,6 +12,7 @@ import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
@@ -619,7 +620,7 @@ object DolbyAc4Decoder {
             
             while (!session.state.name.equals("COMPLETED") && !session.state.name.equals("FAILED")) {
                 yield()
-                Thread.sleep(100)
+                delay(100)
                 if (durationMs > 0) {
                     val statss = session.allStatistics
                     if (statss.isNotEmpty()) {
@@ -637,7 +638,9 @@ object DolbyAc4Decoder {
             withContext(Dispatchers.Main) {
                 onProgress(1f)
             }
-            WavHelper.updateWavHeaderSizes(outputPcmFile, outputPcmFile.length() - 44)
+            if (outputPcmFile.exists() && outputPcmFile.length() > 44) {
+                WavHelper.updateWavHeaderSizes(outputPcmFile, outputPcmFile.length() - 44)
+            }
             
             DecodedMetadata(
                 mimeType = "audio/eac3",
