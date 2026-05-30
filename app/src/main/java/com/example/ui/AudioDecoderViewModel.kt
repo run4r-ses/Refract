@@ -19,8 +19,6 @@ import com.example.audio.DecoderSupportInfo
 import com.example.audio.DolbyAc4Decoder
 import com.example.audio.WavHelper
 import com.example.audio.FfmpegExportHelper
-import com.example.audio.TrueHdDecoder
-import com.example.audio.DtsDecoder
 import com.example.audio.SoftwareDecoderHelper
 import com.example.DecodingForegroundService
 import kotlinx.coroutines.Job
@@ -299,7 +297,19 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
         _defaultSampleRate.value = prefs.getInt("default_sample_rate", 48000)
         _isLoudnessReportEnabled.value = prefs.getBoolean("loudness_report_enabled", false)
         _exportFlacStereo.value = prefs.getBoolean("export_flac_stereo", false)
-        _exportLocationLabel.value = prefs.getString("export_folder", "Downloads/DolbyRefPlayer") ?: "Downloads/DolbyRefPlayer"
+        val uriStr = prefs.getString("export_folder_uri", null)
+        if (uriStr != null) {
+            try {
+                val uri = Uri.parse(uriStr)
+                var name = uri.path?.substringAfterLast(":") ?: "Custom Directory"
+                if (name.isEmpty()) name = "Custom Directory"
+                _exportLocationLabel.value = name
+            } catch (e: Exception) {
+                _exportLocationLabel.value = "Downloads/Refract"
+            }
+        } else {
+            _exportLocationLabel.value = "Downloads/Refract"
+        }
         val expModeName = prefs.getString("export_mode", ExportMode.StereoBinauralWav.name)
         _exportMode.value = try {
             ExportMode.valueOf(expModeName ?: ExportMode.StereoBinauralWav.name)
@@ -472,38 +482,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                 // Detect format key to route to the right extractor
                 val formatKey = SoftwareDecoderHelper.detectFormatKeyRobust(context, uri, name, null)
 
-                val metadata: DolbyAc4Decoder.DecodedMetadata = when (formatKey) {
-                    "truehd" -> {
-                        val m = TrueHdDecoder.extractMetadata(context, uri)
-                        // Convert to DolbyAc4Decoder.DecodedMetadata for unified state
-                        DolbyAc4Decoder.DecodedMetadata(
-                            mimeType = m.mimeType,
-                            channelCount = m.channelCount,
-                            sampleRate = m.sampleRate,
-                            durationUs = m.durationUs,
-                            profile = m.profile,
-                            bitDepth = m.bitDepth,
-                            bitRate = m.bitRate,
-                            presentationsCount = 1,
-                            jocVersion = m.jocVersion
-                        )
-                    }
-                    "dts" -> {
-                        val m = DtsDecoder.extractMetadata(context, uri)
-                        DolbyAc4Decoder.DecodedMetadata(
-                            mimeType = m.mimeType,
-                            channelCount = m.channelCount,
-                            sampleRate = m.sampleRate,
-                            durationUs = m.durationUs,
-                            profile = m.profile,
-                            bitDepth = m.bitDepth,
-                            bitRate = m.bitRate,
-                            presentationsCount = 1,
-                            jocVersion = m.jocVersion
-                        )
-                    }
-                    else -> DolbyAc4Decoder.extractMetadata(context, uri)
-                }
+                val metadata: DolbyAc4Decoder.DecodedMetadata = DolbyAc4Decoder.extractMetadata(context, uri)
                 
                 // Set default speaker layouts depending on channel configurations parsed
                 if (metadata.channelCount == 2) {
@@ -562,11 +541,54 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
     fun getExportsDir(): File {
         val context = getApplication<Application>()
         val privateDir = File(context.filesDir, "exports").apply { mkdirs() }
-        _exportLocationLabel.value = "Downloads/Refract"
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val uriStr = prefs.getString("export_folder_uri", null)
+        if (uriStr != null) {
+            val uri = Uri.parse(uriStr)
+            var name = uri.path?.substringAfterLast(":") ?: "Custom Directory"
+            if (name.isEmpty()) name = "Custom Directory"
+            _exportLocationLabel.value = name
+        } else {
+            _exportLocationLabel.value = "Downloads/Refract"
+        }
         return privateDir
     }
 
+    fun setExportLocation(uri: Uri) {
+        val prefs = getApplication<Application>().getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        prefs.edit().putString("export_folder_uri", uri.toString()).apply()
+        
+        var name = uri.path?.substringAfterLast(":") ?: "Custom Directory"
+        if (name.isEmpty()) name = "Custom Directory"
+        _exportLocationLabel.value = name
+    }
+
     private fun copyFileToMediaStoreDownloads(context: Context, sourceFile: File, mimeType: String) {
+        val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        val uriStr = prefs.getString("export_folder_uri", null)
+        
+        if (uriStr != null) {
+            try {
+                val treeUri = Uri.parse(uriStr)
+                val pickedDir = androidx.documentfile.provider.DocumentFile.fromTreeUri(context, treeUri)
+                if (pickedDir != null && pickedDir.canWrite()) {
+                    // Try to avoid duplicate files by checking if it exists
+                    var file = pickedDir.findFile(sourceFile.name)
+                    if (file == null) {
+                        file = pickedDir.createFile(mimeType, sourceFile.name)
+                    }
+                    if (file != null) {
+                        context.contentResolver.openOutputStream(file.uri)?.use { out ->
+                            sourceFile.inputStream().use { it.copyTo(out) }
+                        }
+                        return
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+        
         val resolver = context.contentResolver
         val contentValues = android.content.ContentValues().apply {
             put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, sourceFile.name)
@@ -661,44 +683,6 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                     }
 
                     when (formatKey) {
-                        "truehd" -> {
-                            _activeDecoderType.value = "TrueHD · FFmpeg Software (lossless)"
-                            TrueHdDecoder.decode(
-                                context = context,
-                                inputUri = state.uri,
-                                outputPcmFile = cachePcmFile,
-                                targetBitsPerSample = _defaultBitDepth.value,
-                                targetChannelCount = targetChannelCount,
-                                onProgress = progLambda,
-                                onStatusUpdate = statusLambda
-                            ).let { m ->
-                                DolbyAc4Decoder.DecodedMetadata(
-                                    mimeType = m.mimeType, channelCount = m.channelCount,
-                                    sampleRate = m.sampleRate, durationUs = m.durationUs,
-                                    profile = m.profile, bitDepth = m.bitDepth,
-                                    bitRate = m.bitRate, jocVersion = m.jocVersion
-                                )
-                            }
-                        }
-                        "dts" -> {
-                            _activeDecoderType.value = "DTS · FFmpeg Software (dca)"
-                            DtsDecoder.decode(
-                                context = context,
-                                inputUri = state.uri,
-                                outputPcmFile = cachePcmFile,
-                                targetBitsPerSample = _defaultBitDepth.value,
-                                targetChannelCount = targetChannelCount,
-                                onProgress = progLambda,
-                                onStatusUpdate = statusLambda
-                            ).let { m ->
-                                DolbyAc4Decoder.DecodedMetadata(
-                                    mimeType = m.mimeType, channelCount = m.channelCount,
-                                    sampleRate = m.sampleRate, durationUs = m.durationUs,
-                                    profile = m.profile, bitDepth = m.bitDepth,
-                                    bitRate = m.bitRate, jocVersion = m.jocVersion
-                                )
-                            }
-                        }
                         "eac3" -> {
                             val hasHardwareEac3 = _supportInfo.value?.availableCodecs?.any {
                                 it.mimeType.contains("eac3", ignoreCase = true) && !it.isEncoder &&

@@ -190,6 +190,20 @@ fun DecoderAppScreen(
         }
     }
 
+    val exportFolderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags: Int = android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                context.contentResolver.takePersistableUriPermission(uri, takeFlags)
+                viewModel.setExportLocation(uri)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { _ ->
@@ -532,6 +546,7 @@ fun DecoderAppScreen(
                 onSelectBitDepth = { viewModel.setDefaultBitDepth(it) },
                 onSelectSampleRate = { viewModel.setDefaultSampleRate(it) },
                 onToggleLoudnessReport = { viewModel.setLoudnessReportEnabled(it) },
+                onSelectExportFolder = { exportFolderLauncher.launch(null) },
                 onClearHistory = {
                     viewModel.clearHistory()
                     showSettingsDialog = false
@@ -806,28 +821,16 @@ fun CapabilitiesHardwareCard(
                     }
                 )
 
-                val trueHdCodec = supportInfo?.availableCodecs?.find {
-                    it.mimeType.contains("true-hd", ignoreCase = true) || it.mimeType.contains("mlp", ignoreCase = true)
-                } ?: CodecDetail(supportInfo?.trueHdDecoderNames?.firstOrNull() ?: "ffmpeg-kit (SW)", "audio/true-hd", false, 0)
+                val ac4Codec = supportInfo?.availableCodecs?.find {
+                    it.name == ac4DecoderName
+                } ?: CodecDetail(ac4DecoderName, "audio/ac4", false, 0)
                 AnimatedCodecRow(
-                    title = "Dolby TrueHD (Lossless / Atmos)",
-                    statusText = if (supportInfo?.hasTrueHdHardwareDecoder == true) "✅ Hardware" else "✅ Software fallback",
-                    statusColor = AcidGreen,
+                    title = "AC-4 IMS Binaural",
+                    statusText = if (hasAc4) "✅ Native ($ac4DecoderName)" else "✅ Software fallback",
+                    statusColor = if (hasAc4) AcidGreen else CyberCyan,
                     isReducedMotion = isReducedMotion,
                     delayMs = 80,
-                    onClick = { onShowCodecDetails(trueHdCodec) }
-                )
-
-                val dtsCodec = supportInfo?.availableCodecs?.find {
-                    it.mimeType.contains("dts", ignoreCase = true)
-                } ?: CodecDetail(supportInfo?.dtsDecoderNames?.firstOrNull() ?: "ffmpeg-kit (SW)", "audio/vnd.dts", false, 0)
-                AnimatedCodecRow(
-                    title = "DTS (Digital Surround / DTS:X)",
-                    statusText = if (supportInfo?.hasDtsHardwareDecoder == true) "✅ Hardware" else "✅ Software fallback",
-                    statusColor = AcidGreen,
-                    isReducedMotion = isReducedMotion,
-                    delayMs = 160,
-                    onClick = { onShowCodecDetails(dtsCodec) }
+                    onClick = { onShowCodecDetails(ac4Codec) }
                 )
             }
 
@@ -1721,7 +1724,7 @@ fun SuccessCard(
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "DSP CONVERSION SUCCESSFUL!",
+                    text = "DECODING SUCCESSFUL!",
                     color = AcidGreen,
                     fontWeight = FontWeight.Black,
                     fontSize = 13.sp,
@@ -1734,7 +1737,7 @@ fun SuccessCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "GENERATED WORKSPACE ARTIFACTS (${files.size}):",
+                text = "SPLIT CHANNEL FILES (${files.size}):",
                 color = CoolGrayText,
                 fontWeight = FontWeight.Bold,
                 fontSize = 11.sp,
@@ -2217,6 +2220,7 @@ fun SystemSettingsDialog(
     onSelectBitDepth: (Int) -> Unit,
     onSelectSampleRate: (Int) -> Unit,
     onToggleLoudnessReport: (Boolean) -> Unit,
+    onSelectExportFolder: () -> Unit,
     onClearHistory: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -2306,7 +2310,10 @@ fun SystemSettingsDialog(
                 HorizontalDivider(color = SurfaceBorder)
 
                 // Export directory indicator
-                Column {
+                Column(modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onSelectExportFolder() }
+                ) {
                     Text("Export Folder", color = IceWhite, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Text("Files are saved here after export", color = CoolGrayText, fontSize = 9.sp)
                     Spacer(modifier = Modifier.height(6.dp))
@@ -2335,6 +2342,8 @@ fun SystemSettingsDialog(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("CLEAR HISTORY & RESET SETTINGS", fontSize = 11.sp, fontWeight = FontWeight.Black)
                 }
+                Spacer(modifier = Modifier.height(16.dp))
+                Text("alpha-v0.4", color = CoolGrayText, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
             }
         },
         containerColor = CardDark
@@ -2377,8 +2386,8 @@ fun HardwareInfoDialog(
                     lineHeight = 15.sp
                 )
                 Text(
-                    "• Dolby TrueHD & DTS:\n" +
-                    "Dolby TrueHD delivers lossless multichannel audio and spatial Atmos mixes. DTS provides high fidelity spatial surround. Both decode natively on supported hardware, or via reliable high-performance software decoding fallbacks.",
+                    "• Dolby AC-4 Profiles:\n" +
+                    "AC-4 IMS (Immersive Stereo) decodes spatial audio downmixed for standard headphones. It requires hardware support to operate natively.",
                     color = IceWhite,
                     fontSize = 11.sp,
                     lineHeight = 15.sp

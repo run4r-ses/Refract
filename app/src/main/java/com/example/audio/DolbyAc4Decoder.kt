@@ -210,8 +210,6 @@ object DolbyAc4Decoder {
         val codecList = MediaCodecList(MediaCodecList.REGULAR_CODECS)
         val ac4Decoders = mutableListOf<String>()
         val eac3Decoders = mutableListOf<String>()
-        val trueHdDecoders = mutableListOf<String>()
-        val dtsDecoders = mutableListOf<String>()
         val allAudioCodecs = mutableListOf<CodecDetail>()
 
         for (info in codecList.codecInfos) {
@@ -247,13 +245,6 @@ object DolbyAc4Decoder {
                             type.equals("audio/eac3", ignoreCase = true) ||
                             type.equals("audio/dolby-eac3", ignoreCase = true) ->
                                 eac3Decoders.add(info.name)
-                            type.contains("true-hd", ignoreCase = true) ||
-                            type.contains("truehd", ignoreCase = true) ||
-                            type.equals("audio/mlp", ignoreCase = true) ->
-                                trueHdDecoders.add(info.name)
-                            type.contains("vnd.dts", ignoreCase = true) ||
-                            type.equals("audio/dts", ignoreCase = true) ->
-                                dtsDecoders.add(info.name)
                         }
                     }
                 }
@@ -264,13 +255,6 @@ object DolbyAc4Decoder {
             hasAc4Decoder = ac4Decoders.isNotEmpty(),
             ac4DecoderNames = ac4Decoders,
             availableCodecs = allAudioCodecs.distinctBy { it.name },
-            hasTrueHdHardwareDecoder = trueHdDecoders.isNotEmpty(),
-            trueHdDecoderNames = trueHdDecoders,
-            hasDtsHardwareDecoder = dtsDecoders.isNotEmpty(),
-            dtsDecoderNames = dtsDecoders,
-            // Software always available via ffmpeg-kit-android-audio
-            hasSoftwareTrueHd = true,
-            hasSoftwareDts = true,
             hasSoftwareEac3 = true
         )
     }

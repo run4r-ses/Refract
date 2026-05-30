@@ -72,6 +72,7 @@ secrets {
 // Some unused dependencies are commented out below instead of being removed.
 // This makes it easy to add them back in the future if needed.
 dependencies {
+  implementation("androidx.documentfile:documentfile:1.0.1")
   implementation("com.arthenica:ffmpeg-kit-audio:6.0-2")
   implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
   implementation("androidx.media3:media3-exoplayer:1.5.1")

@@ -6,15 +6,7 @@ data class DecoderSupportInfo(
     val availableCodecs: List<CodecDetail>,
     val sdkInt: Int = android.os.Build.VERSION.SDK_INT,
     // Software decoder capabilities (via FFmpegKit audio build)
-    val hasSoftwareTrueHd: Boolean = true,  // always true when ffmpeg-kit-android-audio is present
-    val hasSoftwareDts: Boolean = true,
-    val hasSoftwareEac3: Boolean = true,
-    // Hardware TrueHD (very rare, found on some Qualcomm SoCs)
-    val hasTrueHdHardwareDecoder: Boolean = false,
-    val trueHdDecoderNames: List<String> = emptyList(),
-    // Hardware DTS (rare)
-    val hasDtsHardwareDecoder: Boolean = false,
-    val dtsDecoderNames: List<String> = emptyList()
+    val hasSoftwareEac3: Boolean = true
 )
 
 data class CodecDetail(
