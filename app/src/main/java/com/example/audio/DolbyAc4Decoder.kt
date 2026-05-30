@@ -320,6 +320,7 @@ object DolbyAc4Decoder {
         inputUri: Uri,
         outputPcmFile: File,
         targetBitsPerSample: Int,
+        targetChannelCount: Int? = null,
         onProgress: suspend (Float) -> Unit,
         onStatusUpdate: suspend (String) -> Unit
     ): DecodedMetadata = withContext(Dispatchers.IO) {
@@ -416,7 +417,11 @@ object DolbyAc4Decoder {
             }
 
             // Force multichannel output if possible
-            format.setInteger("max-output-channel-count", 32)
+            if (targetChannelCount != null) {
+                format.setInteger("max-output-channel-count", targetChannelCount)
+            } else {
+                format.setInteger("max-output-channel-count", 32)
+            }
             
             codec.configure(format, null, null, 0)
             codec.start()
@@ -581,6 +586,7 @@ object DolbyAc4Decoder {
         inputUri: Uri,
         outputPcmFile: File,
         targetBitsPerSample: Int,
+        targetChannelCount: Int? = null,
         onProgress: suspend (Float) -> Unit,
         onStatusUpdate: suspend (String) -> Unit
     ): DecodedMetadata = withContext(Dispatchers.IO) {
@@ -609,7 +615,8 @@ object DolbyAc4Decoder {
 
             val durationMs = durationUs / 1000.0
             val pcmEncoding = when (targetBitsPerSample) { 24 -> "pcm_s24le"; 32 -> "pcm_s32le"; else -> "pcm_s16le" }
-            val cmd = "-y -i \"${tempInput.absolutePath}\" -vn -c:a $pcmEncoding -ar $sampleRate \"${outputPcmFile.absolutePath}\""
+            val acArg = if (targetChannelCount != null) "-ac $targetChannelCount " else ""
+            val cmd = "-y -i \"${tempInput.absolutePath}\" -vn $acArg-c:a $pcmEncoding -ar $sampleRate \"${outputPcmFile.absolutePath}\""
             
             val session = FFmpegKit.executeAsync(cmd,
                 { /* completion — handled below */ },

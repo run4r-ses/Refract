@@ -607,6 +607,16 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
 
                 val startTime = System.currentTimeMillis()
 
+                val targetChannelCount = when (_speakerConfig.value) {
+                    "Mono" -> 1
+                    "Stereo" -> 2
+                    "5.1" -> 6
+                    "7.1" -> 8
+                    "7.1.4" -> 12
+                    "9.1.6" -> 16
+                    else -> 6
+                }
+
                 val activeMetadata = withContext(Dispatchers.IO) {
                     val formatKey = SoftwareDecoderHelper.detectFormatKey(state.name, state.metadata.mimeType)
                     val hardwareLevel = deriveHardwareEnforcementLevel(_supportInfo.value)
@@ -658,6 +668,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                                 inputUri = state.uri,
                                 outputPcmFile = cachePcmFile,
                                 targetBitsPerSample = _defaultBitDepth.value,
+                                targetChannelCount = targetChannelCount,
                                 onProgress = progLambda,
                                 onStatusUpdate = statusLambda
                             ).let { m ->
@@ -676,6 +687,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                                 inputUri = state.uri,
                                 outputPcmFile = cachePcmFile,
                                 targetBitsPerSample = _defaultBitDepth.value,
+                                targetChannelCount = targetChannelCount,
                                 onProgress = progLambda,
                                 onStatusUpdate = statusLambda
                             ).let { m ->
@@ -696,13 +708,13 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                             if (hasHardwareEac3) {
                                 _activeDecoderType.value = "DD+JOC · Hardware MediaCodec"
                                 DolbyAc4Decoder.decode(
-                                    context, state.uri, cachePcmFile, _defaultBitDepth.value,
+                                    context, state.uri, cachePcmFile, _defaultBitDepth.value, targetChannelCount,
                                     progLambda, statusLambda
                                 )
                             } else {
                                 _activeDecoderType.value = "DD+JOC · FFmpeg Software Fallback"
                                 DolbyAc4Decoder.decodeEac3Software(
-                                    context, state.uri, cachePcmFile, _defaultBitDepth.value,
+                                    context, state.uri, cachePcmFile, _defaultBitDepth.value, targetChannelCount,
                                     progLambda, statusLambda
                                 )
                             }
@@ -711,7 +723,7 @@ class AudioDecoderViewModel(application: Application) : AndroidViewModel(applica
                             // Default: AC-4 / existing hardware path
                             _activeDecoderType.value = "AC-4 · Hardware MediaCodec"
                             DolbyAc4Decoder.decode(
-                                context, state.uri, cachePcmFile, _defaultBitDepth.value,
+                                context, state.uri, cachePcmFile, _defaultBitDepth.value, targetChannelCount,
                                 progLambda, statusLambda
                             )
                         }

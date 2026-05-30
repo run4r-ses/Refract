@@ -806,29 +806,28 @@ fun CapabilitiesHardwareCard(
                     }
                 )
 
-                val ac4Codec = supportInfo?.availableCodecs?.find {
-                    it.name == ac4DecoderName
-                } ?: CodecDetail(ac4DecoderName, "audio/ac4", false, 0)
+                val trueHdCodec = supportInfo?.availableCodecs?.find {
+                    it.mimeType.contains("true-hd", ignoreCase = true) || it.mimeType.contains("mlp", ignoreCase = true)
+                } ?: CodecDetail(supportInfo?.trueHdDecoderNames?.firstOrNull() ?: "ffmpeg-kit (SW)", "audio/true-hd", false, 0)
                 AnimatedCodecRow(
-                    title = "AC-4 IMS Binaural",
-                    statusText = if (hasAc4) "✅ Native ($ac4DecoderName)" else "✅ Software fallback",
-                    statusColor = if (hasAc4) AcidGreen else CyberCyan,
+                    title = "Dolby TrueHD (Lossless / Atmos)",
+                    statusText = if (supportInfo?.hasTrueHdHardwareDecoder == true) "✅ Hardware" else "✅ Software fallback",
+                    statusColor = AcidGreen,
                     isReducedMotion = isReducedMotion,
                     delayMs = 80,
-                    onClick = { onShowCodecDetails(ac4Codec) }
+                    onClick = { onShowCodecDetails(trueHdCodec) }
                 )
 
+                val dtsCodec = supportInfo?.availableCodecs?.find {
+                    it.mimeType.contains("dts", ignoreCase = true)
+                } ?: CodecDetail(supportInfo?.dtsDecoderNames?.firstOrNull() ?: "ffmpeg-kit (SW)", "audio/vnd.dts", false, 0)
                 AnimatedCodecRow(
-                    title = "AC-4 L4 Multichannel Support",
-                    statusText = if (Build.VERSION.SDK_INT >= 36) {
-                        if (hasAc4) "✅ Native hardware" else "⚠️ Requires Android 16 · No decoder found"
-                    } else {
-                        "⚠️ Requires Android 16 (you are on Android ${Build.VERSION.SDK_INT})"
-                    },
-                    statusColor = if (Build.VERSION.SDK_INT >= 36 && hasAc4) AcidGreen else RedAlert,
+                    title = "DTS (Digital Surround / DTS:X)",
+                    statusText = if (supportInfo?.hasDtsHardwareDecoder == true) "✅ Hardware" else "✅ Software fallback",
+                    statusColor = AcidGreen,
                     isReducedMotion = isReducedMotion,
                     delayMs = 160,
-                    onClick = { onShowCodecDetails(ac4Codec) }
+                    onClick = { onShowCodecDetails(dtsCodec) }
                 )
             }
 
@@ -1477,8 +1476,8 @@ fun FileSelectedCard(
                 val tooltipMsg = if (allowSplit) null else "AC-4 IMS is 2.0 — split export not applicable."
 
                 ExportModeOptionTile(
-                    title = "Split WAV (per channel)",
-                    desc = "Splits each audio track coordinate into individual discrete mono WAV files.",
+                    title = "Split WAV (stereo pairs)",
+                    desc = "Splits each audio track coordinate into individual discrete stereo WAV files.",
                     selected = selectedMode == AudioDecoderViewModel.ExportMode.MonoWavCustomSplit,
                     enabled = allowSplit,
                     tooltip = tooltipMsg,
@@ -2378,8 +2377,8 @@ fun HardwareInfoDialog(
                     lineHeight = 15.sp
                 )
                 Text(
-                    "• Dolby AC-4 Profiles:\n" +
-                    "AC-4 IMS (Immersive Stereo) decodes spatial audio downmixed for standard headphones. AC-4 L4 supports discrete multichannel layouts (such as 5.1.4 or 7.1.4) which require native hardware support available in Android 16 (API 36).",
+                    "• Dolby TrueHD & DTS:\n" +
+                    "Dolby TrueHD delivers lossless multichannel audio and spatial Atmos mixes. DTS provides high fidelity spatial surround. Both decode natively on supported hardware, or via reliable high-performance software decoding fallbacks.",
                     color = IceWhite,
                     fontSize = 11.sp,
                     lineHeight = 15.sp

@@ -77,6 +77,7 @@ object TrueHdDecoder {
         inputUri: Uri,
         outputPcmFile: File,
         targetBitsPerSample: Int,
+        targetChannelCount: Int? = null,
         onProgress: suspend (Float) -> Unit,
         onStatusUpdate: suspend (String) -> Unit
     ): DecodedMetadata = withContext(Dispatchers.IO) {
@@ -96,8 +97,9 @@ object TrueHdDecoder {
                 else -> "pcm_s24le"
             }
             val sampleRate = metadata.sampleRate
+            val acArg = if (targetChannelCount != null) "-ac $targetChannelCount " else ""
 
-            val cmd = "-y -i \"${tempInput.absolutePath}\" -vn -c:a $pcmCodec -ar $sampleRate \"${outputPcmFile.absolutePath}\""
+            val cmd = "-y -i \"${tempInput.absolutePath}\" -vn $acArg-c:a $pcmCodec -ar $sampleRate \"${outputPcmFile.absolutePath}\""
 
             val session = FFmpegKit.executeAsync(
                 cmd,
